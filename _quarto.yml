@@ -1,0 +1,55 @@
+project:
+  type: book
+  output-dir: _book
+
+book:
+  title: "R for Data Science with solutions (2e)"
+  reader-mode: true
+  chapters:
+    - index.qmd
+    - intro.qmd
+    - data-visualization.qmd
+    - workflow-basics.qmd
+    - data-transformation.qmd
+    - workflow-code-style.qmd
+    - data-tidying.qmd
+    - workflow-scripts-and-projects.qmd
+    - data-import.qmd
+    - workflow-help.qmd
+    - layers.qmd
+    - exploratory-data-analysis.qmd
+    - communication.qmd
+    - logical-vectors.qmd
+    - numbers.qmd
+    - strings.qmd
+    - regular-expressions.qmd
+    - factors.qmd
+    - dates-and-times.qmd
+    - missing-values.qmd
+    - joins.qmd
+    - spreadsheets.qmd
+    - databases.qmd
+    - arrow.qmd
+    - hierarchical-data.qmd
+    - web-scrapping.qmd
+    - functions.qmd
+    - iteration.qmd
+    - a-field-guide-to-base-R.qmd
+    - quarto.qmd
+    - quarto-formats.qmd
+        
+bibliography: references.bib
+
+format:
+  html:
+    theme: cosmo
+    callout-appearance: simple    
+    code-link: true
+  pdf:
+    documentclass: scrreprt
+
+mermaid:
+    theme: neutral
+    
+editor: visual
+

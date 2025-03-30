@@ -1,0 +1,1382 @@
+# Numbers {#sec-numbers}
+
+```{r}
+#| echo: false
+
+source("_settings.R")
+```
+
+## Introduction
+
+Numeric vectors are the backbone of data science, and you've already used them a bunch of times earlier in the book. Now it's toe systematically survey what you can do with them in R, ensuring that you're well situate to tackle any future problem involving numeric vectors.
+
+We'll start by giving you a coupe of tools to make number if you have string, and then going into a little more detail of `count()`. Then we'll dive into various numeric transformations that can be applied to other types of vectors, but are often used with numeric vectors. We'll finish off by covering the summary function that pair well with `summarize()` and show you how they can also be used with `mutate()`.
+
+### Prerequisites
+
+This chapter mostly uses functions from base R, which are available without loading any packages. But we still need the tidyverse because we'll use these base R functions inside of tidyverse functions like `mutate()` and `filter()`. Like in the last chapter, we'll use real examples from nycflights13 as well as toy examples made with `c()` and `tribble()`.
+
+```{r}
+#| warning: false
+library(tidyverse)
+library(nycflights13)
+```
+
+## Making numbers
+
+In most cases, you'll get numbers already recorded in one of R's numeric types: integer or double. In some cases, however, you'll encounter them as string, possible because you've created them by pivoting from column headers or because something has gone wrong in your data import process.
+
+readr provides two useful functions for parsing strings into numbers: `parse_double()` and `parse_number()`. Use `parse_double()` when you have numbers that have been written as strings:
+
+```{r}
+x <- c("1.2", "5.6", "1e3")
+parse_double(x)
+```
+
+Use `parse_number()` when the string contains non-numeric text that you want to ignore. This is particularly useful for currency data and percentages:
+
+```{r}
+y <- c("$1,234", "USD 3,418", "76%")
+parse_number(y)
+```
+
+## Counts {#sec-counts}
+
+It's surprising how much data science you can do with just counts and a little basic arithmetic, so dplyr strives to make counting as easy as possible with `count()`. This function is great for quick exploration and checks during analysis:
+
+```{r}
+flights |>
+  count(dest)
+```
+
+If you want to see the most common values, add `sort = TRUE`:
+
+```{r}
+flights |>
+  count(dest, sort = TRUE)
+```
+
+You can perform the same computation "by hand" with `group_by()`, `summarize()` and `n()`. This is useful because it allows you to compute other summaries at the same time:
+
+```{r}
+flights |>
+  group_by(dest) |>
+  summarise(
+    n = n(),
+    delay = mean(arr_delay, na.rm = TRUE)
+  )
+```
+
+Also you can use `summarise()` with `.by`:
+
+```{r}
+flights |>
+  summarise(
+    n = n(),
+    delay = mean(arr_delay, na.rm = TRUE),
+    .by = dest
+  )
+```
+
+`n()` is a special summary function that doesn't take any arguments and instead accesses information about the "current" group. This means that it only works inside dplyr verbs.
+
+```{r}
+#| error: true
+
+n()
+```
+
+There are a couple of variants of `n()` and `count()` that you might find useful:
+
+-   `n_distinct()` counts the number of distinct (unique) values of one or more variables. For example we could figure out which destinations are served by the most carriers:
+
+    ```{r}
+    flights |>
+      group_by(dest) |>
+      summarise(carriers = n_distinct(carrier)) |>
+      arrange(desc(carriers))
+    ```
+
+-   A weighted count is a sum. For example you could "count" the number of miles each plane flew:
+
+    ```{r}
+    flights |>
+      group_by(tailnum) |>
+      summarise(miles = sum(distance))
+    ```
+
+    Weighted counts are a common problem so `count()` has a `wt` argument that does the same thing:
+
+    ```{r}
+    flights |>
+      count(tailnum, wt = distance)
+    ```
+
+-   You can count missing values be combining `sum()` and `is.na()`. In the `flights` dataset this represents flights that are cancelled:
+
+    ```{r}
+    flights |>
+      group_by(dest) |>
+      summarise(n_canceled = sum(is.na(dep_time)))
+    ```
+
+### Exercises
+
+1.  How can you use `count()` to count the number of rows with a missing value for a given variable:
+
+    In general, for a dataset `df` counting the number of rows with a missing value for the variable `x` can be computed using `count()` via `is.na()` using
+
+    ```{r}
+    #| eval: false
+    df |>
+      count(is.na(x))
+    ```
+
+    E.g., for the `flights` dataset and the `dep_time` variable:
+
+    ```{r}
+    flights |>
+      count(is.na(dep_time))
+    ```
+
+2.  Expand the following calls to `count()` to instead use `group_by()`, `summarize()`, and `arrange()`:
+
+    1.  `flights |> count(dest, sort = TRUE)`
+
+        ```{r}
+        dest_count <- flights |>
+          count(dest, sort = TRUE)
+        dest_count
+        ```
+
+        ```{r}
+        dest_summ <- flights |>
+          group_by(dest) |>
+          summarise(n = n()) |>
+          arrange(desc(n), dest)
+        dest_summ  
+        ```
+
+        The data frame computed using `count()` and the one computed using `group_by()`, `summarize()`, and `arrange()` are identical:
+
+        ```{r}
+        all.equal(dest_count, dest_summ)
+        ```
+
+    2.  `flights |> count(tailnum, wt = distance)`
+
+        ```{r}
+        tailnum_count <- flights |>
+          count(tailnum, wt = distance)
+        tailnum_count  
+        ```
+
+        ```{r}
+        tailnum_summ <- flights |>
+          group_by(tailnum) |>
+          summarise(n = sum(distance)) |>
+          arrange(tailnum)
+        ```
+
+        The data frame computed using `count()` and the one computed using `group_by()`, `summarize()`, and `arrange()` are identical:
+
+        ```{r}
+        all.equal(tailnum_count, tailnum_summ)
+        ```
+
+## Numeric transformations {#sec-numeric-transformation}
+
+Transformation functions work well with `mutate()` because their output is the same length as the input. The vast majority of transformation functions are already built into base R. It's impractical to list them all so this section will show the most useful ones.
+
+### Arithmetic and recycling rules
+
+We introduced the basics of arithmetic in @sec-workflow-basics and have used them a bunch since. These functions don't need a huge amount of explanation because they do what you learned in grade school. But we need to briefly talk about the **recycling rules** which determine what happens when the left and right hand sides have different lengths. This is important for operations like `flights |> mutate(air_time = air_time / 60)` because there are 336776 number on the left of `/` but only one on the right.
+
+R handles mismatched lengths by **recycling**, or repeating, the short vector. We can see this in operation more easily if we create some vectors outside of a data frame:
+
+```{r}
+x <- c(1, 2, 10, 20)
+x / 5
+# is shorthand for 
+x / c(5, 5, 5, 5)
+```
+
+Generally, you only want to recycle single numbers (i.e. vectors of length 1), but R will recycle any shorter length vector. It usually (but not always) gives you a warning if the longer vector isn't a multiple of the shorter:
+
+```{r}
+x * c(1, 2)
+x * c(1, 2, 3)
+```
+
+These recycling rules are also applied to logical comparisons and can lead to a surprising result if you accidentally use `==` instead of `%in%` and the data frame has an unfortunate number of rows. For example take this code which attempts to find all flights in January and February:
+
+```{r}
+flights |>
+  filter(month == c(1, 2))
+```
+
+The code runs without error, but it doesn't return what you want. Because of the recycling rules it filters the flights dataset by checking the equality between the vector representing `month` variable and the vector `rep(c(1,2), nrow(flights))` i.e. checking if the values corresponding to the odd rows are equal to 1 and checking if the values corresponding to the even rows are equal to 2. There is no warning because `flights` has an even number of rows.
+
+To protect you from this type of silent failure, most tidyverse functions use a stricter form of recycling that only recycles single values. Unfortunately that doesn't help here, or in many other cases, because the key computation is performed by the base R function `==`, not `filter()`.
+
+### Minimum and maximum
+
+The arithmetic functions work with pairs of variables. Two closely related functions are `pmin()` and `pmax()`, which when given two or more variables will return the smallest or largest value in each row:
+
+```{r}
+df <- tribble(
+  ~x, ~y,
+  1, 3,
+  5, 2,
+  7, NA,
+)
+
+df |>
+  mutate(
+    min_on_rows = pmin(x, y, na.rm = TRUE),
+    max_on_rows = pmax(x, y, na.rm = TRUE)
+  )
+```
+
+### Modular arithmetic
+
+Modular arithmetic is the technical name of the the type of math you did before you learned about decimal places, i.e. division that yields a whole number and a remainder. In R, `%/%` does integer division and `%%` computes the remainder:
+
+```{r}
+1:10 %/% 3
+1:10 %% 3
+```
+
+Modular arithmetic is handy for the `flights` dataset, because we can use it to unpack the `sched_dep_time` variable into `hour` and `minute`:
+
+```{r}
+flights |>
+  mutate(
+    sched_dept_hour = sched_dep_time %/% 100, 
+    sched_dept_minute = sched_dep_time %% 100, 
+    .keep = "used"
+  )
+```
+
+We can combine that with the `mean(is.na(x))` trick from @sec-summaries to see how the proportion of cancelled flights varies over the course of the day. The results are shown in @fig-proportion-flights-canceled.
+
+```{r}
+#| label: fig-proportion-flights-canceled
+#| fig-cap: A line plot with scheduled departure hour on x-axis, and proportion of cancelled flights on the y-axis. Cancellations accumulate over the course of the day until 8pm, very late flights are much less likely to be cancelled.
+
+flights |>
+    mutate(
+    sched_dept_hour = sched_dep_time %/% 100
+  ) |>
+  summarise(
+    number_of_flights = n(),
+    prop_canceled = mean(is.na(dep_time)),
+    .by = sched_dept_hour
+  ) |>
+  filter(sched_dept_hour %in% 5:24) |>
+  ggplot(aes(x = sched_dept_hour, y = prop_canceled)) +
+  geom_point(aes(size = number_of_flights)) +
+  geom_line() +
+  labs(
+    title = "Canceled flights proportion vs. departure time",
+    x = "Scheduled departure hour",
+    y = "Proportion of canceled flights",
+    size = "Number\nof flights"
+  )
+```
+
+### Logarithms
+
+Logarithms are an incredibly useful transformation for dealing with data that ranges across multiple orders of magnitude and converting exponential growth to linear growth. In R, you have a choice of three logarithms: `log()` (the natural log base) `log2()` (base 2) and `log10()` (base 10).
+
+### Rounding
+
+Use `round(x)` to round a number to the nearest integer:
+
+```{r}
+round(123.456)
+```
+
+You can do control precision of the rounding with the second argument, `digits`. `round(x, digits)` round to the nearest 10^-n^, so `digits = 2` will round to the nearest 0.01. This definition is useful because it implies `round(x, -3)` will round to the nearest thousand , which indeed it does:
+
+```{r}
+round(123.456, 2) # two digits
+round(123.456, 1) # one digits
+round(123.456, -1) # round to the nearest ten
+round(123.456, -2) # round to the nearest hundred
+```
+
+There's one weirdness with `round()` that seems surprising at first glance:
+
+```{r}
+round(c(1.5, 2.5))
+```
+
+`round()` uses what's known as "round half to even" or Banker's rounding: if a number is half way between two integers, it will be rounded to the **even** integer. This is a good strategy because it keeps the rounding unbiased: half of all 0.5s are rounded up, and half are rounded down.
+
+`round()` is paired with `floor()` which always rounds down and `ceiling()` which always rounds up:
+
+```{r}
+x <- 123.456
+floor(x)
+ceiling(x)
+```
+
+These functions don't have a `digits` argument, so you can instead scale down, round and then scale back up:
+
+```{r}
+# Round down to the nearest two digits
+floor(x / 0.01) * 0.01
+# Round up to the nearest two digits
+ceiling(x / 0.01) * 0.01
+```
+
+You can use the same technique if you want to `round()` to a multiple of some other number:
+
+```{r}
+# Round to the nearest multiple of 4
+round(x / 4) * 4
+# Round to the nearest 0.25
+round(x / 0.25) * 0.25
+```
+
+### Cutting numbers into ranges
+
+Use `cut()` to break up (aka bin) a numeric vector into discrete buckets:
+
+```{r}
+x <- c(1, 2, 5, 10, 15, 20)
+cut(x, breaks = c(0, 5, 10, 15, 20))
+```
+
+The `breaks()` don't need to be evenly spaced:
+
+```{r}
+cut(x, breaks = c(0, 5, 10, 100))
+```
+
+You can optionally supply your own `lables`. Note that there should be one less `labels` than `breaks`.
+
+```{r}
+cut(
+  x,
+  breaks = c(0, 5, 10, 15, 20),
+  labels = c("sm", "md", "lg", "xl")
+)
+```
+
+Any values outside of the range of the breaks will become `NA`:
+
+```{r}
+y <-c(NA, 10, 5, 10, 30)
+cut(y, breaks = c(0, 5, 10, 15, 20))
+```
+
+See the documentation for other useful arguments like `right` and `include.lowest`, which control if the intervals are `[a, b)` or `(a, b]` and if the lowest interval should be `[a, b]`.
+
+### Cumulative and rolling aggregates
+
+Base R provides `cumsum()`, `cumprod()`, `cummin()`, `cummax()` for running (or cumulative) sums, products, mins and maxes. dplyr provides `cummean()` for cumulative means. Cumulative sums tend to come up the most in practice:
+
+```{r}
+x <- 1:10
+cumsum(x)
+```
+
+If you need more complex rolling or sliding aggregates, try the [slider](https://slider.r-lib.org/) package.
+
+### Exercises
+
+1.  Explain in words what each line of the code used in @fig-proportion-flights-canceled does.
+
+    The flights data frame is first mutated, ading `sched_dept_hour` numerical variable containing the scheduled departure hour. The resulting data frame is summarised, computing the number of flights and the proportion of canceled flights by departure hour. The summary data frame is then filtrered, excluding the departure hours between 1 and 3. Finally the resulting data frame is ploted using `geom_point()` and `geom_line()`.
+
+2.  What trigonometric functions does R provide? Guess some names and look up the documentation. Do they use degrees or radians?
+
+    The trigonometric functions provided by R base:
+
+    -   `cos(x)`, `sin(x)`, `tan(x)` (computing the cosine, sine and tangent)
+    -   `acos(x)`, `asin(x)`, `atan(x)` (computing arc-cosine, arc-sine and arc-tangent),
+    -   `atan2(y, x)` (computing the2-argument arctangent)
+    -   `cospi(x)` (computing `cos(\pi * x)`), `sinpi(x)` (computing `sin(\pi * x)`) and `tanpi(x)` (computing `tan(\pi * x)`).
+
+    ```{r}
+    #| layout-ncol: 2
+    #| fig-width: 4
+    tb <- tibble(x = seq(-2*pi, 2*pi, 0.05))
+
+    # Top left
+    tibble(x = seq(-pi, pi, 0.01)) |>
+      ggplot(aes(x = x, y = sin(x))) +
+      geom_line(color = "tomato")
+
+    # Top right
+    tibble(x = seq(-1, 1, 0.01)) |>
+      ggplot(aes(x = x, y = asin(x))) +
+      geom_line(color = "tomato")
+
+    #  Middle left
+    tibble(x = seq(-pi, pi, 0.01)) |>
+      ggplot(aes(x = x, y = cos(x))) +
+      geom_line(color = "tomato")
+
+    #  Middle right
+    tibble(x = seq(-1, 1, 0.01)) |>
+      ggplot(aes(x = x, y = acos(x))) +
+      geom_line(color = "tomato")
+
+    #  Bottom left
+    tibble(x = seq(-pi/2 + 0.05, pi/2 - 0.05, 0.01)) |>
+      ggplot(aes(x = x, y = tan(x))) +
+      geom_line(color = "tomato")
+
+    #  Bottom right
+    tibble(x = seq(-5, 5, 0.01)) |>
+      ggplot(aes(x = x, y = atan(x))) +
+      geom_line(color = "tomato")
+    ```
+
+3.  Currently `dep_time` and `sched_dep_time` are convenient to look at, but hard to compute with because they're not really continuous numbers. You can see the basic problem by running the code below: there's a gap between each other.
+
+    ```{r}
+    #| warning: false
+    flights |> 
+      filter(month == 1, day ==1) |>
+      ggplot(aes(x = sched_dep_time, y = dep_delay)) +
+      geom_point()
+    ```
+
+    Convert them to a more truthful representation of time (either fractional hours or minutes since midnight).
+
+    ```{r}
+    #| warning: false
+    #| layout-ncol: 2
+    #| fig-width: 4
+
+    flights_dep_truthful <- flights |>
+      filter(month == 1, day ==1) |>
+      mutate(
+        sched_dep_time_frac = (sched_dep_time %/% 1e2) + 
+          (sched_dep_time %% 1e2)/60,
+        sched_dep_time_min = (sched_dep_time %/% 1e2) * 60 + 
+          sched_dep_time %% 1e2
+      ) 
+
+    # Left (time in hours, fractional representation)
+    flights_dep_truthful |>
+      ggplot(aes(x = sched_dep_time_frac, y = dep_delay)) +
+      geom_point() +
+      labs(
+        x = "Sched. depart time (hours)",
+        y = "Departure delay (minutes)",
+      )
+
+    # Right (time in minutes, from midnight)
+    flights_dep_truthful |>
+      ggplot(aes(x = sched_dep_time_min, y = dep_delay)) +
+      geom_point() +
+      labs(
+        x = "Sched. depart time (minutes)",
+        y = "Departure delay (minutes)",
+      )
+    ```
+
+4.  Round `dep_time` and `arr_time` to the nearest five minutes.
+
+    ```{r}
+    flights |>
+      mutate(
+        dep_time_r5 = round(dep_time / 5) * 5,
+        arr_time_r5 = round(arr_time / 5) * 5,
+        .keep = "used"
+      )
+    ```
+
+## General transformations
+
+The following sections describe some general transformations which are often used with numeric vectors, but can be applied to all other column types.
+
+### Ranks
+
+dplyr provides a number of ranking functions inspired by SQL, but you should always start with `dplyr:min_rank()`. It uses the typical method for dealing with ties, e.g., 1st, 2nd, 2nd, 4th.
+
+```{r}
+x <- c(1, 2, 2, 3, 4, NA)
+min_rank(x)
+```
+
+Note that the smallest values get the the lowest ranks; use `desc(x)` to give the largest values the smallest ranks:
+
+```{r}
+min_rank(desc(x))
+```
+
+If `min_rank()` doesn't do what you need, look at the variants `dplyr::row_number()`, `dplyr::dense_rank()`, `dplyr::percent_rank()`, and `dplyr::cume_dist()`. See the documentation for details.
+
+```{r}
+df <- tibble(x = x) 
+df |>
+  mutate(
+    row_number = row_number(x),
+    dense_rank = dense_rank(x), 
+    percent_rank = percent_rank(x),
+    cume_dist = cume_dist(x)
+  )
+```
+
+You can achieve many of the same results by picking the appropriate `ties.method` argument to base R's `rank()`; you'll probably also want to set `na.last = "keep"` to keep `NA`s as `NA`.
+
+`row_number()` can also be used without any arguments when inside a dplyr verb. In this case, it'll give the number of the "current" row. When combined with `%%` or `%/%` this can be a useful tool for dividing data into similarly sized groups.
+
+```{r}
+df <- tibble(id = 1:10)
+
+df |>
+  mutate(
+    row0 = row_number() - 1,
+    three_groups = row0 %% 3,
+    three_in_each_group = row0 %/% 3
+  )
+```
+
+### Offsets
+
+`dplyr::lead()` and `dplyr::lag()` allow you to refer to the values just before or just after the "current" value. They return a vector of the same length as the input, padded with `NA`s at the start or end:
+
+```{r}
+x <- c(2, 5, 11, 11, 19, 35)
+lag(x)
+lead(x)
+```
+
+-   `x - lag(x)` gives you the difference between the current the previous value.
+
+    ```{r}
+    x - lag(x)
+    ```
+
+-   `x == lag(x)` tells you when the current value changes.
+
+    ```{r}
+    x == lag(x)
+    ```
+
+You can lead or lag by more than one position by using the second argument, `n`.
+
+### Consecutive identifiers
+
+Sometimes you want to start a new group every time some event occurs. For example, when you're looking at website data it's common to want to break up events into sessions, where you begin a new session after a gap of more than `x` minutes since the last activity. For example, imagine you have the times when someone visited a website:
+
+```{r}
+events <- tibble(
+  time = c(0, 1, 2, 3, 5, 10, 12, 15, 17, 19, 20, 27, 28, 30)
+)
+```
+
+And you've computed the time between each event, and figured out if there's a gap that's big enough to qualify
+
+```{r}
+events <- events |>
+  mutate(
+    diff = time - lag(time, default = first(time)),
+    has_gap = diff >= 5
+  )
+events
+```
+
+But how do we go from that logical vector to something that we can `group_by()`? `cumsum()`, from @sec-numeric-transformation come to the rescue as gap, i.e. `has_gap` is `TRUE`, will increment `group` by one (@sec-summaries):
+
+```{r}
+events |>
+  mutate(
+    group = cumsum(has_gap)
+  )
+```
+
+Another approach for creating grouping variables is `consecutive_id()`, which starts a new group every time one of its arguments changes. For example, imagine you have a data frame with a bunch of repeated values:
+
+```{r}
+df <- tibble(
+  x = c("a", "a", "a", "b", "c", "c", "d", "e", "a", "a", "b", "b"),
+  y = c(1, 2, 3, 2, 4, 1, 3, 9, 4, 8, 10, 199)
+)
+```
+
+If you want to keep the first row from each repeated `x`, you could use `group_by()`, `consecutive_id()`, and `slice_head()`:
+
+```{r}
+df |>
+  group_by(id = consecutive_id(x)) |>
+  slice_head(n = 1)
+```
+
+### Exercises
+
+1.  Find the 10 most delayed flights using a ranking function. How do you want to handle ties? Carefully read the documentation for `min_rank()`.
+
+    This exercise can't be solved rigurously (in general) without using a type of ordering function like `arrange()` or `slice_min()` which would make the use of ranking function redundant.
+
+    The way to solve it using `min_rank` involves computing the rank (using `desc` in order to associate the first ranks to the highest delay values) and filtering by the rank value less or equal to the number of flights of we want. However, in case of ties, filtering can lead to higer number than the desired one. Slicing has to be used, but with a fixed value it does not guarantee the highest delay values will be selected, so `slice_max` has to be used which makes the use of `min_rank` unnecessary.
+
+    First, a toy example. Suppose we want to find the 3 most delayed flights in the following tibble.
+
+    ```{r}
+    df <- tibble(
+      carrier = c("AF", "BW", "UA", "DL", "AA", "AF", "DL", "AA", "AF"),
+      delays = c(1, 10, 11, 4, 10, NA, 2, 10, 12)
+      )
+    df
+    ```
+
+    By computing the rank and filtering by the rank values less than 3 we get the most delayed 5 values.
+
+    ```{r}
+    df |> 
+      mutate(rank = min_rank(desc(delays))) |>
+      filter(rank <= 3)
+    ```
+
+    Hence, we need to slice the result. But slicing it using `slice_head` gives:
+
+    ```{r}
+    df |> 
+      mutate(rank = min_rank(desc(delays))) |>
+      filter(rank <= 3) |>
+      slice_head(n = 3)
+    ```
+
+    which misses the flight with the highest delay value (and ranked first). We can get the 3 most delayed flights by using `slice_min` with `with_ties = FALSE`, in order to make sure the smallest rank values are sliced:
+
+    ```{r}
+    df |> 
+      mutate(rank = min_rank(desc(delays))) |>
+      filter(rank <= 3) |>
+      slice_min(rank, n = 3, with_ties = FALSE)
+    ```
+
+    However, the use `slice_min` makes the use of `min_rank` redundant. We can get the 3 most delayed flights simply applying it on the variable of interst:
+
+    ```{r}
+    #| eval: false
+    df |>
+      slice_max(delays, n = 3, with_ties = FALSE)
+    ```
+
+    For the flights dataset, using `min_rank()`:
+
+    ```{r}
+    flights |>
+      # rank variable added to the dataset, ranks are computed using 
+      # desc, so the highest values (delays) have the smallest ranks.
+      mutate(rank = min_rank(desc(dep_delay))) |>
+      
+      # filtering the dataset by the the rank values under 10.
+      filter(rank <= 10) |>
+      
+      # slicing the first 10 rows since in case of ties the filtering above 
+      # can lead to more than 10 values.
+      slice_min(rank, n = 10) |>
+      
+      # select just the flight information, delay and rank for clear print.
+      select(carrier, flight, tailnum, origin, dest, dep_delay, rank)
+    ```
+
+    Note that in this case, it happens that between the 10 most delayed flights there are no ties so the result would be the same without the `slice_min` line. Straightforward approaches using ordering functions:
+
+    ```{r}
+    #| eval: false
+    # using slice_max
+    flights |>
+      slice_max(dep_delay, n = 10, with_ties = FALSE) |>
+      select(carrier, flight, tailnum, origin, dest, dep_delay)
+    ```
+
+2.  Which plane (`tailnum`) has the worst on-time record?
+
+    ```{r}
+    flights |>
+      summarise(
+        per_flight_arr_delay = sum(arr_delay, na.rm = TRUE) / n(),
+        .by = tailnum
+      ) |>
+      slice_max(per_flight_arr_delay)
+    ```
+
+3.  What time of day should you fly if you want to avoid delays as much as possible?
+
+    The time of day will be defined as it follows: night for \[0:00 5:00), morning for \[5:00 9:00), mid morning for \[9:00 12:00), afternoon for \[12:00 17:00), evening for \[17:00 21:00), and late evening for \[21:00 23:59\].
+
+    ```{r}
+    flights_timeday <- flights |>
+      mutate(time_of_day = case_when(
+        sched_dep_time < 500 ~ "night",
+        sched_dep_time < 900 ~ "morning",
+        sched_dep_time < 1200 ~ "mid morning",
+        sched_dep_time < 1700 ~ "afternoon",
+        sched_dep_time < 2100 ~ "evening",
+        sched_dep_time < 2400 ~ "late evening"
+        )
+      )
+    ```
+
+    There is only one night flight for which delay variables are NA:
+
+    ```{r}
+    flights_timeday |>
+      filter(time_of_day == "night")
+    ```
+
+    We can compute the summary with respect to the mean arrival delay and we can visualize the mean arrival delays for each day period. There are many ways to get this visualization, here we will use a lolipop representation, using `geom_point()` and `geom_segment()` and showing just the mean delay for each time day level and a `stat_summary()`-type visualization, using `geom_pointrange`, showing the mean delay with the 2 standard deviations.
+
+    ```{r}
+    #| layout-ncol: 2
+    #| fig-width: 4
+
+    # Left
+    flights_timeday |>
+      filter(time_of_day != "night") |>
+      summarise(
+        mean_arr_delay = mean(arr_delay, na.rm = TRUE),
+        median_arr_delay = median(arr_delay, na.rm = TRUE),
+        .by = time_of_day
+      ) |>
+      ggplot(
+        aes(
+          x = fct_reorder(time_of_day, mean_arr_delay, mean), 
+          y = mean_arr_delay,
+          color = fct_reorder(time_of_day, mean_arr_delay, mean)
+        )
+      ) +
+      geom_point(size = 3) +
+      geom_segment(
+        aes(
+          x = fct_reorder(time_of_day, mean_arr_delay, mean),  
+          xend = fct_reorder(time_of_day, mean_arr_delay, mean), 
+          y = 0, 
+          yend = mean_arr_delay
+        )
+      ) +
+      labs(
+        title = "Mean arival time (lolipop)",
+        x = "Time of the day",
+        y = "Mean"
+      ) +
+      theme(legend.position="none")
+
+    # Right
+    flights_timeday |>
+      filter(time_of_day != "night") |>
+      summarise(
+        mean_arr_delay = mean(arr_delay, na.rm = TRUE),
+        sd_arr_delay = sd(arr_delay, na.rm = TRUE),
+        .by = time_of_day
+      ) |>
+      ggplot(
+        aes(
+          x = fct_reorder(time_of_day, mean_arr_delay, mean), 
+          y = mean_arr_delay,
+          color = fct_reorder(time_of_day, mean_arr_delay, mean)
+        )
+      ) +
+      geom_pointrange(
+        aes(
+          ymin = -2*sd_arr_delay, 
+          ymax = 2*sd_arr_delay
+        )
+      ) +
+      labs(
+        title = "Mean and 2 sds arival time ",
+        x = "Time of the day",
+        y = "Mean and 2 sds"
+      ) +
+      theme(legend.position="none")
+    ```
+
+    Another way to get an idea about delay arrivals for each day time level is to visualize the arrival delay distributions. Here we will use a boxplot representation, using `geom_boxplot()` and a violin representation using `geom_violin()`:
+
+    ```{r}
+    #| warning: false
+    #| layout-ncol: 2
+    #| fig-width: 4
+
+    # Left
+    flights_timeday |>
+      filter(time_of_day != "night") |>
+      ggplot(
+        aes(
+          x = fct_reorder(time_of_day, arr_delay, median), 
+          y = arr_delay, 
+          fill = time_of_day
+        )
+      ) +
+      geom_boxplot() +
+      labs(
+        title = "Arrival delay distribution (boxplot)",
+        x = "Time of the day",
+        y = "Arrival delay"
+      ) +
+      theme(legend.position="none")
+
+    # Right
+    flights_timeday |>
+      filter(time_of_day != "night") |>
+      ggplot(
+        aes(
+          x = fct_reorder(time_of_day, arr_delay, median),
+          y = arr_delay, 
+          fill = time_of_day
+        )
+      ) +
+      geom_violin(alpha = 0.3) +
+      labs(
+        title = "Arrival delay distribution (violin)",
+        x = "Time of the day",
+        y = "Arrival delay"
+      ) +
+      theme(legend.position="none")
+    ```
+
+    However, the mean arrival delay is not very informative since it is just a point estimate and the distribution visualization via boxplots is not very informative due to the outliers.
+
+    One other strategy is to look, within each day time level, at the counts of different levels of delay, i.e. to discretize the `arr_delay`. The arrival delay levels will be defined as "very early" for \< -30, "early" for \[-45 -15), "on time" for \[-15 15\], "late" for (15 45\], "very late" for \> 45.
+
+    ```{r}
+    #| layout-nrow: 2
+    #| fig-width: 6
+
+    # Left
+    flights_timeday |>
+      mutate(arr_delay_levels = factor(case_when(
+        arr_delay < -45 ~ "very early",
+        arr_delay < -15 ~ "early",
+        arr_delay <= 15 ~ "on time",
+        arr_delay <= 45 ~ "late",
+        arr_delay >  45 ~ "very late"
+        ),
+        levels = c("very early", "early", "on time", "late", "very late")
+        )
+      ) |>
+      drop_na() |>
+      ggplot(
+        aes(
+          x = fct_reorder(
+            .f = time_of_day, 
+            .x = arr_delay_levels, 
+            .fun = function(.x) mean(.x == "very late")
+          ),
+          fill = arr_delay_levels
+        )
+      ) + 
+      geom_bar() +
+      labs(
+        title = "Arrival delay distribution by time-day",
+        x = "Time of the day",
+        y = "Counts",
+        fill = NULL
+      ) +
+      theme(legend.position = "bottom")
+
+    # Right
+    flights_timeday |>
+      mutate(arr_delay_levels = factor(case_when(
+        arr_delay < -45 ~ "very early",
+        arr_delay < -15 ~ "early",
+        arr_delay <= 15 ~ "on time",
+        arr_delay <= 45 ~ "late",
+        arr_delay >  45 ~ "very late"
+      ),
+      levels = c("very early", "early", "on time", "late", "very late")
+      )
+      ) |>
+      drop_na() |>
+      ggplot(
+        aes(
+          x = fct_reorder(
+            .f = time_of_day, 
+            .x = arr_delay_levels, 
+            .fun = function(.x) mean(.x == "very late")
+          ),
+          fill = arr_delay_levels
+        )
+      ) + 
+      geom_bar(position = "fill") +
+        labs(
+        title = "Proportion of delay levels",
+        x = "Time of the day",
+        y = "Proportions",
+        fill = NULL
+      ) +
+      theme(legend.position = "bottom")
+    ```
+
+    This representation gives a clear visualization of how proportions of different delay levels varies with the time day levels. The proportion of "very late" delayed flights raises from morning to mid morning to afternoon to evening and to late evening. This trend can be seen for "late" flights as well.
+
+4.  What does `flights |> group_by(dest) |> filter(row_number() < 4)` do? What does `flights |> group_by(dest) |> filter(row_number(dep_delay) < 4)` do?
+
+    `row_number()` (used with no argument, inside a dplyr verb) gives the number of the current row. So `filter(row_number() < 4)` will return the first three rows. Since the dataset is first grouped, `group_by(dest)`, it will return the first three rows within each group. The order they appear in the groups is simply the order they are present in the dataframe so effectively what `flights |> group_by(dest) |> filter(row_number() < 4)` does is to select up to the first 3 entries of each destination value in the dataframe. ("Up to" because for values with less than 3 entries, there will be less entries. Since there are `{r} nycflights13::flights |> dplyr::pull(dest) |> unique() |> length()` `dest` unique values, the expected result is a 3 $\times$ `{r} nycflights13::flights |> dplyr::pull(dest) |> unique() |> length()` rows dataset at most. The numbers of rows can be smaller if for certain destinations there are less than 3 entries. (In particular, this is the case, since there is just one entry for `"LEX"` and `"LGA"` destinations, so the numbers of rows should be 3 $\times$ `{r} nycflights13::flights |> dplyr::pull(dest) |> unique() |> length()` - 4).
+
+    ```{r}
+    flights |> 
+      group_by(dest) |> 
+      filter(row_number() < 4) |>
+      nrow()
+    ```
+
+    `row_number(dep_delay)` returns the a (unique) rank for each input so effectively `row_number(dep_delay) < 4` returns `TRUE` for the smallest three values of `dep_delay` variables. Since the dataset is first grouped by `dest` `flights |> group_by(dest) |> filter(row_number(dep_delay) < 4)` will return up to three values for each level in `dest`. Since `row_number()` handles the ties equivalently as `rank(ties.method = "first")`, this means that irrespective of possible ties present in the input, there won't be ties in the `row_number()` output and so we know, a priori that we can't get more than 3 values values (rows). We can get less than 3, as discussed above, if the input has less than 3 entries, which is the case for `"LEX"` and `"LGA"` destinations which have one entry in the dataset respectively. In particular for `"LGA"` entry, the corresponding `dep_delay` value is a `NA` so this time we expect the number of rows to be 3 $\times$ `{r} nycflights13::flights |> dplyr::pull(dest) |> unique() |> length()` - 5) and the dataframe to contain (up to) the three smalles values for `dep_delay` for each `dest` level.
+
+    ```{r}
+    flights |> 
+      group_by(dest) |> 
+      filter(row_number(dep_delay) < 4) |>
+      nrow()
+    ```
+
+5.  For each destination, compute the total minutes of delay. For each flight compute the proportion of the total delay for its destination.
+
+    In the following delay is interpreted as the `arr_delay`, i.e. we compute totals and proportions based on this variable. Flight is interpreted as the `flight` variable, which has unique values for each entry. Also, in order for the proportions to make sense, we need to restrict ourselves to non-negative delays. However, for the first part, i.e. total minutes of delay for each destination computation we will use the full dataset, so even the negative delays will be considered.
+
+    Computation of the total minutes of delay for each destination:
+
+    ```{r}
+    flights |>
+      summarise(
+        total_delay_mins = sum(arr_delay, na.rm = TRUE),
+        per_flight_delay_mins = total_delay_mins / n(),
+        .by = dest
+      ) |>
+      arrange(desc(total_delay_mins))
+    ```
+
+    The airport that accumulated the most delay minutes during the year 2013 is ATL airport. Of course, ATL has one of the highest number of flights from NY so the total is not very informative. We can see that for example IAD or BNA airports have a higher rate of delay minutes per flight.
+
+    As mentioned for computing proportion that are meaningful we need to exclude negative delays.
+
+    ```{r}
+    flights |>
+      filter(arr_delay >= 0) |>
+      group_by(dest) |>
+      mutate(
+        total_delay_mins = sum(arr_delay, na.rm = TRUE),
+        prop_delay_mins = arr_delay / total_delay_mins
+      ) |>
+      ungroup() |>
+      select(flight, tailnum, time_hour, dest, total_delay_mins, prop_delay_mins) |>
+      arrange(desc(prop_delay_mins))
+    ```
+
+    The flight that has the highest proportion of delay minutes for an airport is flight 887, 2013-08-17 and accounts for 0.627% of the delayed time on ANC airport. This make sense since (between flights with non-negative arrival delay) there is a small number of flights from NYC to ANC airport (5 flights) which typically had very small arrival delays (1, 2, 10 and 10 minutes) with one exception (flight 887)
+
+    ```{r}
+    flights |>
+      filter(arr_delay >= 0) |>
+      filter(dest == "ANC") |>
+      select(flight, tailnum, time_hour, dest, arr_delay) |>
+      arrange(desc(arr_delay))
+    ```
+
+6.  Delays are typically temporally correlated: even once the problem that caused the initial delay has been resolved, later flights and delayed to allow earlier flights to leave. Using `lag()`, explore how the average flight delay for an hour is related to the average delay for the previous hour.
+
+    ```{r}
+    flights |> 
+      mutate(hour = dep_time %/% 100) |>
+      group_by(year, month, day, hour) |>
+      summarise(
+        avg_dep_delay = mean(dep_delay, na.rm = TRUE), 
+        n = n(),
+        .groups = "drop"
+      ) |>
+      filter(n > 5)
+    ```
+
+    The code above is computing the average departure delay for each hour, for all days in the data frame (excluding the hours with less 6 flights per hour). To compute the correlation between the average flights delay for an hour (`avg_dep_delay`) and the average flights delay for the previous hour, we can compute `prev_avg_dep_delay` using `lag()`, and compute the correlation between the two.
+
+    ```{r}
+    avg_and_prev_avg <- flights |> 
+      mutate(hour = dep_time %/% 100) |>
+      group_by(year, month, day, hour) |>
+      summarise(
+        avg_dep_delay = mean(dep_delay, na.rm = TRUE), 
+        n = n(),
+        # Only the last variable in grouping is dropped since we want to use 
+        # lag to compute the previous average departure delays for each day,
+        # i.e. for each (year, month, day)
+        .groups = "drop_last"
+      ) |>
+      filter(n > 5) |>
+      # Remove the canceled flights (for canceled flights dep_time is NaN 
+      # hence the hour will be NA so we can use is.na(hour) to detect 
+      # canceled flights)
+      filter(!is.na(hour)) |>
+      # Remove the (departure) hours 0, 1, 2, 3 and 4 (this is to avoid rolling
+      # over the delays to another day)
+      filter(!(hour %in% 0:4)) |>
+      # Add the prev_avg_dep_delay variable, representing the previous average
+      # departure delay (using lag hence inducing NA values for every first 
+      # value per group)
+      mutate(prev_avg_dep_delay = lag(avg_dep_delay)) |>
+      filter(!is.na(prev_avg_dep_delay)) |>
+      ungroup()
+      
+    avg_and_prev_avg
+    ```
+
+    The correlation between the average departure delay and previous average departure delay is
+
+    ```{r}
+    corr <- avg_and_prev_avg |>
+      with(cor(avg_dep_delay, prev_avg_dep_delay))
+    corr
+    ```
+
+    showing a strong positive linear correlation.
+
+    The mean value for `avg_dep_delay`, `prev_avg_dep_delay`:
+
+    ```{r}
+    means <- avg_and_prev_avg |>
+      select(avg_dep_delay, prev_avg_dep_delay) |>
+      map(mean)
+    means
+    ```
+
+    The standard error for `avg_dep_delay`, `prev_avg_dep_delay`:
+
+    ```{r}
+    sds <- avg_and_prev_avg |>
+      select(avg_dep_delay, prev_avg_dep_delay) |>
+      map(sd)
+    sds
+    ```
+
+    The slope and the intercept of the linear regression can be computed from correlation and the standard deviations:
+
+    ```{r}
+    beta <- corr * sds$prev_avg_dep_delay/sds$avg_dep_delay
+    beta
+    alpha <- means$prev_avg_dep_delay - beta * means$avg_dep_delay
+    alpha
+    ```
+
+    Obviously, one other way to obtain the slope and the intercept is simply running a linear model:
+
+    ```{r}
+    #| message: false
+    avg_and_prev_avg |>
+      with(lm(prev_avg_dep_delay ~ avg_dep_delay))
+    ```
+
+    The visualization of the linear regression:
+
+    ```{r}
+    #| layout-ncol: 2
+    #| fig-width: 4
+     
+    # Left, using alpha and beta computed from correlation and 
+    # standard deviations
+    avg_and_prev_avg |>
+      ggplot(aes(x = avg_dep_delay, y = prev_avg_dep_delay)) +
+      geom_point(color = "tomato", alpha = 0.3) +
+      geom_abline(slope = 1, intercept = 1, color = "grey") +
+      geom_abline(
+        slope = beta, intercept = alpha, 
+        color = "tomato", linewidth = 1
+      )
+     
+    # Right, using lm() 
+    avg_and_prev_avg |>
+      ggplot(aes(x = avg_dep_delay, y = prev_avg_dep_delay)) +
+      geom_point(color = "tomato", alpha = 0.3) +
+      geom_abline(slope = 1, intercept = 1, color = "grey") +
+      geom_smooth(
+        method = "lm", 
+        se = FALSE
+      )
+    ```
+
+7.  Look at each destination. Can you find flights that are suspiciously fast (i.e. flights that represent a potential data entry error)? Compute the air time of a flight relative to the shortest flight to that destination. Which flights were most delayed in the air?
+
+    One straightforward approach is to select the flights for which the proportion between speed and mean or median (group) speed is the highest.
+
+    ```{r}
+    flights_speed <- flights |>
+      mutate(
+        speed = distance / (air_time / 60),
+      ) |>
+      group_by(origin, dest) |>
+      mutate(
+        mean_speed = mean(speed, na.rm = TRUE),
+        median_speed = median(speed, na.rm = TRUE),
+        prop_mean = speed / mean_speed,
+        prop_median = speed / median_speed
+      ) |>
+      ungroup() |>
+      select(month, day, origin, dest, speed, 
+             mean_speed, median_speed, prop_mean, prop_median)
+
+    flights_speed |>
+      slice_max(prop_mean, n = 10)
+
+    flights_speed |>
+      slice_max(prop_median, n = 10)
+    ```
+
+    A more rigurous approach would involve selecting the observations with corresponding speed values higher than some quantiles values. However, the number of observation per group (i.e. origin, destination) is typicall small so this approach results in a large number of outliers, even for 99^th^ quantile.
+
+    ```{r}
+    flights_speed <- flights |>
+      mutate(
+        speed = distance / (air_time / 60),
+      ) |>
+      group_by(origin, dest) |>
+      mutate(
+        q95 = quantile(speed, 0.95, na.rm = TRUE),
+        out_q95 = speed > q95,
+        q99 = quantile(speed, 0.99, na.rm = TRUE),
+        out_q99 = speed > q99
+      ) |>
+      ungroup() |>
+      select(month, day, origin, dest, speed,
+             q95, out_q95, q99, out_q99)
+
+    flights_speed |>
+      filter(out_q95)
+
+    flights_speed |>
+      filter(out_q99)
+    ```
+
+## Numeric summaries
+
+Just using the counts, means, and sums that we've introduced already can get you a long way, but R provides many other useful summary functions. Here is a selection that you might find useful.
+
+### Center
+
+So far, we've mostly used `mean()` to summarize the center of a vector of values. As we've seen in @sec-case-study-aggregates, because the mean is the sum divided by the count, it is sensitive to even just a few unusually high or low values. An alternative is to use the `median()`, which finds a value that lies in the "middle" of the vector, i.e. 50% of the values are above it and 50% are below it. Depending on the shape of the distribution of the variable you're interested in, mean or median might be a better measure of center. For example, for symmetric distributions we generally report the mean while for skewed distributions we usually report the median.
+
+Figure @fig-mean-median-comparison compares the mean vs. the median departure delay (in minutes) for each destination. The median delay is always smaller than the mean delay because flights sometimes leave multiple hours late but never leave multiple hours early.
+
+```{r}
+#| label: fig-mean-median-comparison
+#| fig-cap: A scatterplot showing the differences of summarizing daily departure delay with median instead of mean.
+#| warning: false
+flights |>
+  summarise(
+    mean_dep_delay = mean(dep_delay, na.rm = TRUE),
+    median_dep_delay = median(dep_delay, na.rm = TRUE),
+    .by = c(month, day)
+  ) |>
+  ggplot(aes(x = mean_dep_delay, y = median_dep_delay)) +
+  geom_abline(slope = 1, intercept = 0, 
+              color = "white", linewidth = 2) +
+  geom_point() +
+  labs(
+    x = "Mean (minutes)",
+    y = "Median (minutes)",
+  )
+```
+
+You might also wonder about the **mode**, or the most common value. This is a summary that only works well for very simple cases, but it doesn't work well for many real datasets. If the data is discrete, there may be multiple most common values, and if the data is continuous, there might be no most common value because every value is ever so slightly different. For these reasons, the mode tends not to be used by statisticians and there's no mode function included in base R. (The function `mode()` gets or sets the storage mode of an R object).
+
+### Minimum, maximum, and quantiles
+
+What if you're interested in locations other than the center? `min()` and `max()` will give you the largest and smallest values. Another powerful tool is `quantile()` which is a generalization of the median: `quantile(x, 0.25)` will find the value of `x` that is greater than 25% of the values, `quantile(x, 0.50)` is equivalent to the median and `quantile(x, 0.95)` will find the value that's greater than 95% of the values.
+
+For the `flights` data, you might want to look at the 95% quantile of delays rather than the maximum because. it will ignore 5% of most delayed flights which can be quite extreme.
+
+```{r}
+flights |>
+  summarise(
+    max = max(dep_delay, na.rm = TRUE),
+    q95 = quantile(dep_delay, 0.95, na.rm = TRUE),
+    .by = c(month, day)
+  )
+```
+
+### Spread
+
+Sometimes you're not so interested in where the bulk of that lies but in how it is spread out. Two commonly used summaries are the the standard deviation `sd(x)`, and the inter-quartile range, `IQR()`. We won't explain `sd()` here since you're probably already familiar with it but `IQR()` might be new - it's `quantile(x, 0.75) - quantile(x, 0.25)` and gives yo the range that contains the middle 50% of the data.
+
+We can use this to reveal a small oddity in the `flights` data. You might expect the spread of the distance between origin and destination to be zero since airports are always in the same place. But the code below reveals a data oddity for airport [EGE](https://en.wikipedia.org/wiki/Eagle_County_Regional_Airport):
+
+```{r}
+flights |>
+  summarise(
+    distance_iqr = IQR(distance),
+    n = n(),
+    .by = c(origin, dest)
+  ) |>
+  filter(distance_iqr > 0)
+```
+
+### Distributions
+
+It's worth remembering that all of the summary statistics described above are a way of reducing the distribution down to a single number. This means that they're fundamentally reductive, and if you pick the wrong summary, you can easily miss important differences between groups. That's why it's always a good idea to visualize the distribution before committing to your summary statistics.
+
+@fig-distributions shows the overall distribution of departure delays. The distribution is so skewed that we have to zoom in to see the bulk of the data. This suggests that the mean is unlikely to be a good summary and we might prefer the median instead.
+
+```{r}
+#| echo: false
+#| warning: false
+#| fig-asp: 0.5
+#| label: fig-distributions
+#| fig-cap: | 
+#|   (Left) The histogram of the full data is extremely skewed making it hard to get any details. (Right) Zooming into delays of less than two hours makes it possible to see what's happening with the bulk of the observations.
+
+library(patchwork)
+
+h1 <- flights |>
+  ggplot(aes(x = dep_delay)) + 
+  geom_histogram(binwidth = 5)
+
+h2 <- flights |>
+  ggplot(aes(x = dep_delay)) + 
+  geom_histogram(binwidth = 5) +
+  coord_cartesian(xlim = c(-50, 125))
+
+h1 + h2
+```
+
+It is also a good idea to check that distributions for subgroups resemble the whole. In the following plot 365 frequency polygons of `dep_delay`, one for each day are overlaid. The distributions seem to follow a common pattern, suggesting it's fine to use the same summary for each day.
+
+```{r}
+flights |>
+  filter(dep_delay < 120) |>
+  ggplot(aes(x = dep_delay, group = interaction(day, month))) +
+  geom_freqpoly(binwidth = 5, alpha = 1/5)
+```
+
+Don't be afraid to explore you own custom summaries specifically tailored for the data that you're working with. In this case, that might mean separately summarizing the flights that left early vs the flights that left late, or given that the values are so heavily skewed, you might try a log-transform. Finally don't forget what you learned in @sec-data-transformation: whenever creating numerical summaries, it's a good idea to include the number of observations in each group.
+
+### Positions
+
+There's one final type of summary that's useful for numeric vectors, but also works with every other type of value: extracting a value at a specific position: `first(x)`, `first(x)`, and `nth(x, n)`.
+
+For example, we can find the first, fifth and last departure for each day:
+
+```{r}
+flights |>
+  summarise(
+    first_dep = first(dep_time, na_rm = TRUE),
+    fifth_dep = nth(dep_time, 5, na_rm = TRUE),
+    last_dep = last(dep_time, na_rm = TRUE),
+    .by = c(day, month)
+  )
+```
+
+(NB: Because dplyr functions use `_` to separate components of function and arguments names, these functions use `na_rm` instead of `na.rm`)
+
+If you're familiar with `[`, which we'll come back in @sec-selecting-multiple-elements, you might wonder if you ever need these functions. there are three reasons: the `default` argument allows you to provide a default if the specified position doesn't exist, the `order_by` argument allows you to locally override the order of the rows and the `na_rm` argument allows you to drop missing values.
+
+Extracting values at positions is complementary to filtering on ranks. Filtering gives you all variables, with each observation in a separate row:
+
+```{r}
+flights |>
+  group_by(month, day) |>
+  mutate(r = min_rank(sched_dep_time)) |>
+  filter(r %in% c(1, max(r)))
+```
+
+### With `mutate()`
+
+As the name suggest, the summary functions are typically paired with `summarise()`. However, because of the recycling rules they can also be usefully paired with `mutate()`, particularly when you want to do some sort of group standardization. For example:
+
+-   `x / sum(x)` calculate the proportion of a total.
+-   `(x - mean(x)) / sd(x)` computes a Z-score (standardized to mean 0 and sd 1).
+-   `(x - min(x)) / (max(x) - min(x))` standardizes to range \[0, 1\].
+-   `x / first(x)` computes an index based on the first observation.
+
+### Exercises
+
+1.  Brainstorm at least 5 different ways to asses the typical delay characteristics of a group of flights. When is `mean()` useful? When is `median()` useful? When might you want to use something else? Should you use arrival delay or departure delay? Why might you want to use data from `planes`?
+
+    The typical delay can be assessed by point estimates, i.e. the mean or the median, by distributions (histograms, density or geom_polygons) or by boxplots.
+
+    `mean()` is suitable when the distribution is symmetric, `median()` is suitable when the distribution is skewed.
+
+    Spread measures (i.e. variance or IQR) might be used when the we are interested in how data is spread.
+
+    Data from `planes` can be interesting in combination with data from `flights` if we are interested to asses a measure (e.g. the dealy) for aircraft models or manufacturer.
+
+2.  Which destination show the greatest variation in air speed?
+
+    ```{r}
+    flights |>
+      mutate(speed = distance / air_time) |>
+      summarise(
+        speed_variation = var(speed, na.rm = TRUE),
+        .by = c(origin,dest)
+        ) |>
+      arrange(desc(speed_variation))
+    ```
+
+    ```{r}
+    flights |>
+      mutate(speed = distance / air_time) |>
+      summarise(
+        speed_variation = IQR(speed, na.rm = TRUE),
+        .by = c(origin,dest)
+        ) |>
+      arrange(desc(speed_variation))
+    ```
+
+3.  Create a plot to further explore the adventures of EGE. Can you find any evidence that the airport moved locations? Can you find another variable that might explain the difference?
+
+    Filtering the dataframe so it contains only flights with destination `EGE`, adding the variable `dep_date` (created from `time_hour`, representing the departure date, a date class variable) and selecting the variables of interest (dep_date, origin, dest, distance):
+
+```{r}
+flights_to_EGE <- flights |>
+  filter(dest == "EGE") |>
+  mutate(dep_date = date(time_hour)) |>
+  select(dep_date, origin, dest, distance) |>
+  arrange(dep_date)
+```
+
+```         
+Checking if there is a variation in the distance between origin airports and `EGE` during the year and the number of values:
+```
+
+```{r}
+flights_to_EGE|>
+  group_by(origin) |> 
+  summarise(
+    dist_var = var(distance, na.rm = TRUE),
+    n_distances = length(unique(distance))
+  )
+```
+
+```         
+There are two unique distance, hence one distance change. Visualizing the distance shift: 
+```
+
+```{r}
+flights_to_EGE |>
+  ggplot(aes(x = dep_date, y = distance, colour = origin)) +
+  geom_point()
+```
+
+```         
+Using lagged differences (diff) to determine the date when distance changed
+```
+
+```{r}
+flights_to_EGE |>
+  group_by(origin) |>
+  mutate(
+    change = c(0, diff(distance, 1))
+    ) |>
+  ungroup() |>
+  filter(change != 0)
+```
+
+Visualizing the distance shift by considering only February and March dates:
+
+```{r}
+flights_to_EGE |>
+  filter(dep_date > ymd("2013-02-01") & dep_date < ymd("2013-03-31")) |>
+  ggplot(aes(x = dep_date, y = distance, colour = origin)) +
+  geom_point()
+```
+
+## Summary
+
+You’re already familiar with many tools for working with numbers, and after reading this chapter you now know how to use them in R. You’ve also learned a handful of useful general transformations that are commonly, but not exclusively, applied to numeric vectors like ranks and offsets. Finally, you worked through a number of numeric summaries, and discussed a few of the statistical challenges that you should consider.
